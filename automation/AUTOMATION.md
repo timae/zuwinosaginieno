@@ -10,11 +10,40 @@ set) loads the result into Postgres. Configure it via environment variables or a
 `.env` file at the repo root (git-ignored):
 
 ```bash
-# .env  (repo root — never committed)
+# .env  (repo root — never committed; copy from .env.example)
 DATABASE_URL=postgresql://user:pass@localhost:5432/wines
 VIVINO_COUNTRIES=ch,fr,it,es,us,de,pt,at
 VIVINO_TYPES=1,2,3,4
 VIVINO_MAX_PAGES=25
+# Telegram (see "Telegram notifications" below):
+TELEGRAM_BOT_TOKEN=123456789:AA...
+TELEGRAM_CHAT_ID=123456789
+```
+
+## Telegram notifications
+
+`run_scrape.sh` sends a detailed message on **every** run — a ✅ summary with the
+wine count, duration, DB-load status, and per-segment breakdown on success, or a
+❌ report with the exit code and log tail on failure. It's a no-op (just logs a
+line) until you set both variables in `.env`.
+
+One-time setup:
+
+1. In Telegram, message **@BotFather**, send `/newbot`, follow the prompts, and
+   copy the **bot token** it gives you (e.g. `123456789:AA...`).
+2. Send your new bot any message (e.g. "hi") so it has a chat to reply to.
+3. Open `https://api.telegram.org/bot<TOKEN>/getUpdates` in a browser and copy
+   the `"chat":{"id":...}` value — that's your **chat id**.
+4. Put both in `.env`:
+   ```bash
+   TELEGRAM_BOT_TOKEN=123456789:AA...
+   TELEGRAM_CHAT_ID=123456789
+   ```
+
+Test it end to end without waiting for the schedule:
+
+```bash
+bash automation/run_scrape.sh   # runs a scrape and messages you when done
 ```
 
 Prerequisites on any host:
