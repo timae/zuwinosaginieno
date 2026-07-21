@@ -34,6 +34,7 @@ Downstream (`parse_record` → JSONL → Postgres) is unchanged and provider-agn
 | File | Purpose |
 |------|---------|
 | `vivino_scraper.py` | Headed-browser scraper: token builder + SSR extractor + crawl loop |
+| `merge_master.py` | Merge a session's JSONL into the deduped master ledger; report new vs known |
 | `schema.sql` | Postgres table + indexes |
 | `load_to_postgres.py` | Idempotent UPSERT loader for the JSONL |
 | `requirements.txt` | Python deps |
@@ -99,6 +100,20 @@ Style/facts: `style_name`, `style_varietal_name`, `style_description`, `style_bl
 `style_body(+description)`, `style_acidity(+description)`.
 Origin: `winery_name`, `region_name`, `country_code`, `country_name`.
 Composition/facts (jsonb): `grapes`, `foods` (pairings), `flavors` (taste keywords).
+
+## Cross-session dedup (the master ledger)
+
+Each run writes its own `data/wines-<date>.jsonl` (deduped *within* that run). To
+dedup *across* runs and see what's genuinely new, merge into a cumulative master:
+
+```bash
+python merge_master.py data/wines-2026-07-21.jsonl
+# → Session ...: 1082 scraped · 240 new · 842 already-known · 5310 total in master
+```
+
+`data/wines_master.jsonl` holds one line per unique `vintage_id` (freshest version
+wins). The automation wrapper runs this automatically and puts the
+`new / already-known / master total` counts in its Telegram summary.
 
 ## Notes on pagination & coverage
 

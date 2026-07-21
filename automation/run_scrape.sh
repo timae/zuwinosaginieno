@@ -94,6 +94,12 @@ START_TS=$(date +%s)
         --min-delay "$MIN_DELAY" --max-delay "$MAX_DELAY" --out "$OUT"
     SCRAPE_RC=$?
 
+    # Cross-session dedup: merge into the master ledger, reporting new vs known.
+    if [[ "$SCRAPE_RC" == "0" && -s "$OUT" ]]; then
+        echo "$(date '+%F %T')  MERGING into master ledger"
+        "$PY" merge_master.py "$OUT"
+    fi
+
     DB_STATUS="skipped (no DATABASE_URL)"
     if [[ -n "${DATABASE_URL:-}" ]]; then
         if "$PY" load_to_postgres.py "$OUT"; then
@@ -115,9 +121,16 @@ DUR=$(( $(date +%s) - START_TS ))
 ELAPSED="$((DUR/60))m $((DUR%60))s"
 SEGMENTS="$(segment_summary)"
 
+# Recover the merge counts (the merge ran inside the tee'd subshell).
+MERGE_LINE=$(grep -oE 'MERGE session=[0-9]+ new=[0-9]+ known=[0-9]+ total=[0-9]+' "$RUN_LOG" | tail -1)
+NEW=$(sed -n 's/.*new=\([0-9]*\).*/\1/p' <<<"$MERGE_LINE"); NEW=${NEW:-0}
+KNOWN=$(sed -n 's/.*known=\([0-9]*\).*/\1/p' <<<"$MERGE_LINE"); KNOWN=${KNOWN:-0}
+TOTAL=$(sed -n 's/.*total=\([0-9]*\).*/\1/p' <<<"$MERGE_LINE"); TOTAL=${TOTAL:-0}
+
 if [[ "$SCRAPE_RC" == "0" && "$WINES" -gt 0 ]]; then
     notify "✅ Vivino scrape OK — ${DATE} (${HOST})
-Wines: ${WINES}  →  wines-${DATE}.jsonl
+Wines this run: ${WINES}  (new ${NEW} · already-known ${KNOWN})
+Master ledger total: ${TOTAL}
 Duration: ${ELAPSED}
 DB: ${DB_STATUS}
 Segments: ${SEGMENTS}"
