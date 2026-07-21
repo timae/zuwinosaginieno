@@ -136,10 +136,25 @@ wins). The automation wrapper runs this automatically and puts the
 ## Notes on pagination & coverage
 
 Each explore view returns ~24 wines, and pagination (`p=1,2,3,…`) returns disjoint
-results, so you can page deep within a single filter. To go broad, the crawl also
-varies `(origin country × wine type)` — each is its own segment, and results are
-de-duplicated by `vintage_id` across the whole run. Narrowing further by price
-band, rating, or grape yields still more distinct result sets.
+results — **but Vivino clamps deep pagination at ~page 120 (~2,900 results)**: past
+that a query stops returning fresh wines and re-serves the tail. So a single filter
+can never yield more than ~2,900 wines, no matter how high `--max-pages` goes.
+
+To reach past that ceiling the crawl:
+
+1. varies `(origin country × wine type)` — each is its own segment;
+2. when a segment's `records_matched` exceeds the cap, **auto-splits it into price
+   sub-ranges** (geometric split, since prices skew low) and recurses until each
+   leaf slice is under the cap;
+3. de-duplicates everything by `vintage_id`.
+
+**Coverage caveat:** wines with no price in the chosen market collapse to price 0,
+so they all land in the lowest price band, which price-splitting can't break down
+further. If that band still exceeds the cap you'll see a `coverage gap` warning in
+the log — those unpriced wines are only partially reachable via price slicing.
+Combining with other filters (grape, region, or flipping `--order-by`) recovers
+more. Even so, this method only ever reaches Explore's rated/market-available
+universe — not Vivino's full catalogue.
 
 ## Running it on a schedule
 

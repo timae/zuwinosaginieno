@@ -85,7 +85,16 @@ WINE_TYPES = {
 }
 
 PER_PAGE = 24          # explore renders 24 results per page
-DEFAULT_MAX_PAGES = 20
+
+# Vivino clamps deep pagination: past ~page 120 (~2,900 results) a query stops
+# returning fresh wines and just re-serves the tail. So there is no point paging
+# deeper than this, and a single query can never yield more than ~PAGE_CAP*24
+# wines regardless of how many `records_matched` claims. To reach the rest of a
+# large segment we split it into price sub-ranges (each under the cap).
+DEFAULT_MAX_PAGES = 120
+SEGMENT_CAP = 2900      # if records_matched exceeds this, sub-slice by price
+MIN_PRICE_BAND = 1      # don't split a price range narrower than this
+
 DEFAULT_COUNTRIES = ["ch", "fr", "it", "es", "us", "de", "pt", "at"]
 DEFAULT_TYPES = [1, 2, 3, 4]
 
@@ -242,6 +251,17 @@ class BrowserFetcher:
             locale="en-US",
             viewport={"width": 1440, "height": 900},
         )
+        # We only need the server-rendered HTML, so drop images/media/fonts to
+        # cut bandwidth and speed up each page load. Scripts/CSS/XHR are left
+        # alone so the Cloudflare challenge and hydration still work normally.
+        self.context.route(
+            "**/*",
+            lambda route: (
+                route.abort()
+                if route.request.resource_type in ("image", "media", "font")
+                else route.continue_()
+            ),
+        )
         self.page: Page = (
             self.context.pages[0] if self.context.pages else self.context.new_page()
         )
@@ -287,20 +307,25 @@ class BrowserFetcher:
         country: str,
         wine_type: int,
         page: int,
+        min_price: int | None = None,
+        max_price: int | None = None,
         max_retries: int = 5,
         debug: bool = False,
     ) -> dict[str, Any] | None:
         """
         Load one explore page (origin `country` × `wine_type` × `page`) and
         return {"matches": [...], "records_matched": N} from the SSR payload.
+
+        `min_price`/`max_price` override the session defaults for one call — used
+        by the crawler to sub-slice big segments into price bands.
         """
         token = make_token(
             origin_country=country,
             wine_type=wine_type,
             page=page,
             min_rating=self.min_rating,
-            min_price=self.min_price,
-            max_price=self.max_price,
+            min_price=self.min_price if min_price is None else min_price,
+            max_price=self.max_price if max_price is None else max_price,
             market=self.market,
             currency=self.currency,
             order_by=self.order_by,
@@ -310,9 +335,12 @@ class BrowserFetcher:
         for attempt in range(1, max_retries + 1):
             try:
                 self.page.goto(url, wait_until="domcontentloaded", timeout=45_000)
-                # Let the SSR markup settle (hydration can rewrite the DOM).
-                self.page.wait_for_timeout(2_500)
+                # The results are in the initial SSR HTML; grab it immediately,
+                # and only wait+retry if it isn't there yet (hydration/challenge).
                 page_html = self.page.content()
+                if '"matches":[' not in html_lib.unescape(page_html):
+                    self.page.wait_for_timeout(1_200)
+                    page_html = self.page.content()
 
                 if debug and (attempt == 1 or _looks_blocked(page_html)):
                     log.info("DEBUG html_len=%d blocked=%s",
@@ -454,6 +482,17 @@ def parse_record(match: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _split_price(lo: int, hi: int) -> int:
+    """
+    Pick a split point for a price range. Wine prices are heavily skewed toward
+    the low end, so we split on the geometric mean rather than the arithmetic
+    midpoint — that carves the dense cheap band into finer slices while leaving
+    the sparse expensive range as one slice. Always strictly between lo and hi.
+    """
+    mid = int(round((max(lo, 1) * hi) ** 0.5))
+    return min(hi - 1, max(lo + 1, mid))
+
+
 def extract_matches(payload: dict[str, Any]) -> tuple[list[dict], int]:
     """Return (matches, total_matched) handling the explore_vintage wrapper."""
     exp = payload.get("explore_vintage") or payload
@@ -496,53 +535,80 @@ def crawl(
     seen: set[int] = set()
     written = 0
 
+    def write_matches(matches: list[dict]) -> int:
+        nonlocal written
+        n = 0
+        for match in matches:
+            rec = parse_record(match)
+            if not rec or rec["vintage_id"] in seen:
+                continue
+            seen.add(rec["vintage_id"])
+            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            written += 1
+            n += 1
+        return n
+
+    def label(country, wtype, lo, hi):
+        return f"{country.upper()}/{WINE_TYPES.get(wtype, wtype)} ${lo}-{hi}"
+
+    def drain(country: str, wtype: int, lo: int, hi: int) -> None:
+        """Drain one (country, type, price-range) slice, splitting if it exceeds
+        the per-query cap so we can reach past Vivino's ~SEGMENT_CAP ceiling."""
+        first = fetcher.fetch_page(country, wtype, 1, min_price=lo, max_price=hi, debug=debug)
+        if not first:
+            return
+        matches, total = extract_matches(first)
+        if not matches:
+            return
+
+        # Too many results to reach by paging (Vivino clamps deep pages) — split
+        # the price range and recurse so each leaf slice stays under the cap.
+        if total > SEGMENT_CAP and (hi - lo) > MIN_PRICE_BAND:
+            mid = _split_price(lo, hi)
+            log.info("  %s matched %d > cap %d — splitting at $%d",
+                     label(country, wtype, lo, hi), total, SEGMENT_CAP, mid)
+            drain(country, wtype, lo, mid)
+            drain(country, wtype, mid, hi)
+            return
+
+        # A leaf we can't split further but that still exceeds the cap (e.g. the
+        # lowest band, where all unpriced wines collect) is only partially
+        # covered — surface that rather than hide it.
+        if total > SEGMENT_CAP:
+            log.warning("  %s matched %d but can't split further — only ~%d "
+                        "(the cap) reachable here; coverage gap",
+                        label(country, wtype, lo, hi), total, SEGMENT_CAP)
+
+        new_here = write_matches(matches); fh.flush()
+        log.info("  %s p1: +%d (total %d, matched %d)",
+                 label(country, wtype, lo, hi), new_here, written, total)
+        if len(matches) < PER_PAGE:
+            return
+        for page in range(2, max_pages + 1):
+            time.sleep(random.uniform(min_delay, max_delay))
+            payload = fetcher.fetch_page(country, wtype, page, min_price=lo, max_price=hi, debug=debug)
+            if not payload:
+                break
+            matches, _ = extract_matches(payload)
+            if not matches:
+                break
+            n = write_matches(matches); fh.flush()
+            log.info("  %s p%d/%d: +%d (total %d)",
+                     label(country, wtype, lo, hi), page, max_pages, n, written)
+            # Stop when the page is short (real last page) or all-duplicate
+            # (Vivino has clamped and is re-serving the tail).
+            if len(matches) < PER_PAGE or n == 0:
+                break
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with out_path.open("w", encoding="utf-8") as fh:
             for country in countries:
                 for wtype in types:
-                    log.info(
-                        "=== %s / %s ===",
-                        country.upper(),
-                        WINE_TYPES.get(wtype, wtype),
-                    )
-                    for page in range(1, max_pages + 1):
-                        payload = fetcher.fetch_page(
-                            country, wtype, page, debug=debug
-                        )
-                        if not payload:
-                            break
-
-                        matches, total = extract_matches(payload)
-                        if not matches:
-                            log.info(
-                                "  page %d: empty, stopping this segment", page
-                            )
-                            break
-
-                        new_here = 0
-                        for match in matches:
-                            rec = parse_record(match)
-                            if not rec or rec["vintage_id"] in seen:
-                                continue
-                            seen.add(rec["vintage_id"])
-                            fh.write(json.dumps(rec, ensure_ascii=False) + "\n")
-                            written += 1
-                            new_here += 1
-
-                        fh.flush()
-                        log.info(
-                            "  page %d/%d: +%d wines "
-                            "(total written %d, matched %d)",
-                            page, max_pages, new_here, written, total,
-                        )
-
-                        # Stop the segment when the page is short (last page)
-                        # or when it yields only wines we've already stored
-                        # (pagination has run past the unique results).
-                        if len(matches) < PER_PAGE or new_here == 0:
-                            break
-                        time.sleep(random.uniform(min_delay, max_delay))
+                    log.info("=== %s / %s ===", country.upper(),
+                             WINE_TYPES.get(wtype, wtype))
+                    drain(country, wtype, min_price, max_price)
+                    time.sleep(random.uniform(min_delay, max_delay))
     finally:
         fetcher.close()
 
@@ -562,11 +628,12 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
                    help="comma-separated wine_type_ids (1=Red 2=White 3=Sparkling "
                         "4=Rosé 7=Dessert 24=Fortified)")
     p.add_argument("--max-pages", type=int, default=DEFAULT_MAX_PAGES,
-                   help="max pages per country/type segment (24 wines/page)")
+                   help="max pages per price-slice (24 wines/page); Vivino clamps "
+                        "around 120, so higher rarely helps")
     p.add_argument("--out", default="wines.jsonl", help="output JSONL path")
-    p.add_argument("--min-delay", type=float, default=1.5,
+    p.add_argument("--min-delay", type=float, default=0.8,
                    help="min seconds between page requests")
-    p.add_argument("--max-delay", type=float, default=4.0,
+    p.add_argument("--max-delay", type=float, default=2.0,
                    help="max seconds between page requests")
     p.add_argument("--market", default=DEFAULT_MARKET,
                    help="browsing-market country code for the session (pricing "
