@@ -143,18 +143,21 @@ can never yield more than ~2,900 wines, no matter how high `--max-pages` goes.
 To reach past that ceiling the crawl:
 
 1. varies `(origin country × wine type)` — each is its own segment;
-2. when a segment's `records_matched` exceeds the cap, **auto-splits it into price
-   sub-ranges** (geometric split, since prices skew low) and recurses until each
-   leaf slice is under the cap;
-3. de-duplicates everything by `vintage_id`.
+2. when a segment exceeds the cap, **splits it into fixed price bands**
+   (`PRICE_BAND_EDGES`, wide enough that Vivino honours the filter — very narrow
+   low bands get silently ignored) and pages each band;
+3. **skips any band the moment it yields no new wines** — empty, fully
+   overlapping, or price-filter-ignored bands cost one request, not a full
+   paging storm;
+4. de-duplicates everything by `vintage_id`.
 
-**Coverage caveat:** wines with no price in the chosen market collapse to price 0,
-so they all land in the lowest price band, which price-splitting can't break down
-further. If that band still exceeds the cap you'll see a `coverage gap` warning in
-the log — those unpriced wines are only partially reachable via price slicing.
-Combining with other filters (grape, region, or flipping `--order-by`) recovers
-more. Even so, this method only ever reaches Explore's rated/market-available
-universe — not Vivino's full catalogue.
+**Coverage caveats.** A price filter also makes Vivino count only wines *priced
+in the chosen market*, so a segment's unpriced long tail is reachable only in the
+un-banded pass (capped) — price banding covers the priced wines. Combining with
+other filters (grape, region, `--order-by`) or markets (`--market`) recovers
+more. Either way this method only reaches Explore's rated/market-available
+universe — not Vivino's full catalogue — and you should keep volume/pace modest
+to avoid the bulk-request block (see below).
 
 ## Running it on a schedule
 
