@@ -30,15 +30,21 @@ COLUMNS = [
     "style_id", "style_name", "style_varietal_name", "style_description",
     "style_blurb", "style_body", "style_body_description", "style_acidity",
     "style_acidity_description", "winery_id", "winery_name", "region_id",
-    "region_name", "country_code", "country_name", "grapes", "foods", "flavors",
+    "region_name", "country_code", "country_name",
+    "style_grapes", "style_foods", "flavors",
 ]
-JSONB_COLS = {"grapes", "foods", "flavors"}
+JSONB_COLS = {"style_grapes", "style_foods", "flavors"}
+
+# Back-compat: files scraped before the rename used these key names.
+LEGACY_KEYS = {"style_grapes": "grapes", "style_foods": "foods"}
 
 
 def row_from_record(rec: dict) -> tuple:
     out = []
     for col in COLUMNS:
         val = rec.get(col)
+        if val is None and col in LEGACY_KEYS:
+            val = rec.get(LEGACY_KEYS[col])
         if col in JSONB_COLS:
             val = json.dumps(val or [])
         out.append(val)

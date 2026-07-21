@@ -99,7 +99,25 @@ Categories: `wine_type` / `wine_type_id`, `is_natural`.
 Style/facts: `style_name`, `style_varietal_name`, `style_description`, `style_blurb`,
 `style_body(+description)`, `style_acidity(+description)`.
 Origin: `winery_name`, `region_name`, `country_code`, `country_name`.
-Composition/facts (jsonb): `grapes`, `foods` (pairings), `flavors` (taste keywords).
+Composition/facts (jsonb): `style_grapes`, `style_foods` (pairings), `flavors` (taste keywords).
+
+### Field granularity (important for integrity)
+
+Fields come from different levels of Vivino's data:
+
+| Level | Fields | Bottle-specific? |
+|-------|--------|------------------|
+| Wine | `name`, `winery_name`, `region_name`, `country_*`, `wine_type`, `is_natural` | yes |
+| Wine taste (aggregated reviews) | `flavors` | yes |
+| Vintage | `vintage_year`, `vintage_name`, `vintage_id` | yes |
+| **Style / appellation** | `style_*`, `style_body`, `style_acidity`, **`style_grapes`**, **`style_foods`** | **no** |
+
+`style_grapes` / `style_foods` describe the wine's **style**, not the exact bottle:
+they are shared across every wine of that style (e.g. all Bordeaux carry the same
+six permitted grapes). For single-varietal wines they coincide with the real grape;
+for blends they're the style's full set, not the bottle's actual composition. The
+explore feed has **no** bottle-level blend — that only exists on each wine's detail
+page. The `style_` prefix is there to keep this honest.
 
 ## Cross-session dedup (the master ledger)
 

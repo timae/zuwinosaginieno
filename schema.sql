@@ -35,21 +35,24 @@ CREATE TABLE IF NOT EXISTS wines (
     country_code            TEXT,
     country_name            TEXT,
 
-    -- nested descriptive facts kept as jsonb for flexibility
-    grapes                  JSONB DEFAULT '[]'::jsonb,
-    foods                   JSONB DEFAULT '[]'::jsonb,
+    -- nested descriptive facts kept as jsonb for flexibility.
+    -- NOTE: style_grapes and style_foods are STYLE-level (characteristic of the
+    -- wine's style/appellation, shared across many wines) — NOT this bottle's
+    -- exact blend. flavors is wine-level (aggregated from the wine's reviews).
+    style_grapes            JSONB DEFAULT '[]'::jsonb,
+    style_foods             JSONB DEFAULT '[]'::jsonb,
     flavors                 JSONB DEFAULT '[]'::jsonb,
 
     ingested_at             TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_wines_wine_id      ON wines (wine_id);
-CREATE INDEX IF NOT EXISTS idx_wines_type         ON wines (wine_type_id);
-CREATE INDEX IF NOT EXISTS idx_wines_country      ON wines (country_code);
-CREATE INDEX IF NOT EXISTS idx_wines_style        ON wines (style_id);
-CREATE INDEX IF NOT EXISTS idx_wines_grapes_gin   ON wines USING gin (grapes);
-CREATE INDEX IF NOT EXISTS idx_wines_flavors_gin  ON wines USING gin (flavors);
+CREATE INDEX IF NOT EXISTS idx_wines_wine_id       ON wines (wine_id);
+CREATE INDEX IF NOT EXISTS idx_wines_type          ON wines (wine_type_id);
+CREATE INDEX IF NOT EXISTS idx_wines_country       ON wines (country_code);
+CREATE INDEX IF NOT EXISTS idx_wines_style         ON wines (style_id);
+CREATE INDEX IF NOT EXISTS idx_wines_grapes_gin    ON wines USING gin (style_grapes);
+CREATE INDEX IF NOT EXISTS idx_wines_flavors_gin   ON wines USING gin (flavors);
 
--- Optional normalized view of grapes for querying wine <-> grape relations:
+-- Optional normalized view of grapes for querying wine <-> style-grape relations:
 --   SELECT w.name, g->>'name' AS grape
---   FROM wines w, jsonb_array_elements(w.grapes) g;
+--   FROM wines w, jsonb_array_elements(w.style_grapes) g;

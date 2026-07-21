@@ -373,14 +373,19 @@ def parse_record(match: dict[str, Any]) -> dict[str, Any] | None:
     country = region.get("country") or {}
     winery = wine.get("winery") or {}
 
-    grapes = [
+    # NOTE: grapes/foods come from `wine.style`, so they are STYLE-level
+    # (characteristic of the wine's style/appellation, shared across many wines)
+    # — NOT this specific bottle's blend. Named style_* to make that explicit.
+    # The explore feed has no bottle-level blend; that lives on the wine's
+    # detail page only.
+    style_grapes = [
         {"id": g.get("id"), "name": g.get("name")}
         for g in (style.get("grapes") or [])
         if isinstance(g, dict)
     ]
 
-    # Food pairings — a descriptive "fact", not a rating.
-    foods = [
+    # Food pairings for the style — a descriptive "fact", not a rating.
+    style_foods = [
         {"id": f.get("id"), "name": f.get("name")}
         for f in (style.get("food") or [])
         if isinstance(f, dict)
@@ -408,8 +413,12 @@ def parse_record(match: dict[str, Any]) -> dict[str, Any] | None:
         "vintage_name": vintage.get("name"),
         "vintage_year": vintage.get("year"),
         "seo_name": wine.get("seo_name"),
+        # Vivino wine pages live at /{seo_name}/w/{wine_id}; the /w/{id} part is
+        # authoritative (Vivino rewrites the slug). The legacy /wines/{id} path
+        # does NOT treat the number as a wine_id and resolves to a different wine.
         "vivino_url": (
-            f"https://www.vivino.com/wines/{wine.get('id')}" if wine.get("id") else None
+            f"https://www.vivino.com/{wine.get('seo_name') or 'wine'}/w/{wine.get('id')}"
+            if wine.get("id") else None
         ),
 
         # --- categories ---
@@ -437,8 +446,10 @@ def parse_record(match: dict[str, Any]) -> dict[str, Any] | None:
         "country_name": country.get("name"),
 
         # --- composition + descriptive facts ---
-        "grapes": grapes,
-        "foods": foods,
+        # style_grapes / style_foods are style-level (see note above);
+        # flavors is wine-level (aggregated from this wine's reviews).
+        "style_grapes": style_grapes,
+        "style_foods": style_foods,
         "flavors": flavors,
     }
 
