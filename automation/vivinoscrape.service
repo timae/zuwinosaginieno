@@ -1,0 +1,31 @@
+# systemd service for the Vivino scraper (Linux).
+#
+# Runs the scraper under Xvfb (a virtual display) so headed Chromium works on a
+# headless server. Paired with vivinoscrape.timer for scheduling.
+#
+# Edit User=, WorkingDirectory=, and the paths for your host, then:
+#   sudo cp automation/vivinoscrape.service automation/vivinoscrape.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vivinoscrape.timer
+#   sudo systemctl start vivinoscrape.service      # run once now to test
+#   journalctl -u vivinoscrape.service -f          # watch it
+#
+# Requires on the host:  xvfb, plus Playwright's browser + system deps
+#   sudo apt-get install -y xvfb
+#   .venv/bin/playwright install --with-deps chromium
+
+[Unit]
+Description=Vivino explore scraper (headed Chromium under Xvfb)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=scraper
+WorkingDirectory=/opt/vivinoscrape
+# Secrets/overrides (e.g. DATABASE_URL) live here, not in git:
+EnvironmentFile=-/opt/vivinoscrape/.env
+# xvfb-run gives Chromium a virtual display; -a picks a free display number.
+ExecStart=/usr/bin/xvfb-run -a /opt/vivinoscrape/automation/run_scrape.sh
+TimeoutStartSec=6h
+Nice=10

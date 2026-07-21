@@ -108,6 +108,12 @@ varies `(origin country × wine type)` — each is its own segment, and results 
 de-duplicated by `vintage_id` across the whole run. Narrowing further by price
 band, rating, or grape yields still more distinct result sets.
 
+## Running it on a schedule
+
+See [`automation/AUTOMATION.md`](automation/AUTOMATION.md) for hands-off setups —
+a macOS `launchd` job and a Linux `systemd` + `Xvfb` service (headed Chromium is
+required, so both give the browser a real or virtual display).
+
 ## Tuning if you get blocked
 
 Run headed (never `--headless`). Increase delays (`--min-delay 3 --max-delay 8`),

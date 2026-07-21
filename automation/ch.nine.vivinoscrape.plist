@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS launchd user-agent for the Vivino scraper.
+
+  Runs in your GUI login session (so headed Chromium can open a window).
+  Adjust the path in ProgramArguments if your checkout isn't at
+  /Users/tim/DEV/vivinoscrape. Schedule below = every Sunday at 03:00.
+
+  Install:
+    cp automation/ch.nine.vivinoscrape.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ch.nine.vivinoscrape.plist
+    launchctl kickstart -k gui/$(id -u)/ch.nine.vivinoscrape   # run once now to test
+
+  Remove:
+    launchctl bootout gui/$(id -u)/ch.nine.vivinoscrape
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>ch.nine.vivinoscrape</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/tim/DEV/vivinoscrape/automation/run_scrape.sh</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key><integer>0</integer>
+        <key>Hour</key><integer>3</integer>
+        <key>Minute</key><integer>0</integer>
+    </dict>
+
+    <!-- Don't fire missed runs in a burst if the Mac was asleep. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/tim/DEV/vivinoscrape/logs/launchd.out.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/tim/DEV/vivinoscrape/logs/launchd.err.log</string>
+</dict>
+</plist>

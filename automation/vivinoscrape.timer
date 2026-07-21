@@ -1,0 +1,13 @@
+# systemd timer — schedules vivinoscrape.service. Default: weekly, Sunday 03:00.
+# See `man systemd.time` for the OnCalendar syntax (e.g. "daily", "Mon *-*-* 02:00").
+
+[Unit]
+Description=Run the Vivino scraper on a schedule
+
+[Timer]
+OnCalendar=Sun *-*-* 03:00:00
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
