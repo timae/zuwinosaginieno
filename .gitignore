@@ -1,0 +1,14 @@
+# Scraped data — never commit
+*.jsonl
+wines*.json
+
+# Playwright persistent browser profile (session cookies, cache)
+.vivino-browser-profile/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Env / secrets
+.env
